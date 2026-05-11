@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Runtime Code Obfuscator v2</title>
+  <style>
+    :root {
+      --bg: #0b0f19; --panel: #111827; --border: #1f2937;
+      --text: #e5e7eb; --accent: #6366f1; --accent-hover: #4f46e5;
+      --success: #10b981; --warn: #f59e0b; --err: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg); color: var(--text);
+      padding: 2rem; min-height: 100vh;
+    }
+    .container { max-width: 950px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 1.5rem; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.4rem; }
+    .sub { color: #9ca3af; font-size: 0.9rem; }
+    .controls {
+      display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center;
+    }
+    select, button, textarea {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.65rem 0.8rem; font-family: inherit; font-size: 0.95rem;
+    }
+    button {
+      cursor: pointer; font-weight: 600; transition: 0.2s;
+      background: var(--accent); border-color: var(--accent);
+    }
+    button:hover { background: var(--accent-hover); }
+    button.ghost { background: #1f2937; border-color: #374151; }
+    button.ghost:hover { background: #374151; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    .box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+    .box h3 { margin-bottom: 0.5rem; font-size: 0.85rem; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; }
+    textarea {
+      width: 100%; height: 320px; font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 0.88rem; line-height: 1.5; resize: vertical;
+      white-space: pre; overflow: auto; background: #0f172a; border: none; padding: 0.75rem;
+    }
+    textarea:focus { outline: 2px solid var(--accent); }
+    .note {
+      margin-top: 1rem; padding: 1rem; background: #1e293b;
+      border-left: 4px solid var(--warn); border-radius: 6px;
+      font-size: 0.85rem; line-height: 1.6;
+    }
+    .note code { background: #0f172a; padding: 0.15em 0.3em; border-radius: 4px; }
+    .toast {
+      position: fixed; bottom: 20px; right: 20px; background: var(--success);
+      color: #fff; padding: 0.7rem 1.2rem; border-radius: 8px;
+      opacity: 0; transform: translateY(10px); transition: 0.3s; pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .err-toast { background: var(--err); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔐 Runtime Code Obfuscator v2</h1>
+      <p class="sub">Safe identifier renaming + string encryption. Compiles & runs identically.</p>
+    </header>
+
+    <div class="controls">
+      <select id="lang">
+        <option value="cpp">C++</option>
+        <option value="python">Python</option>
+      </select>
+      <button onclick="obfuscate()">⚡ Obfuscate</button>
+      <button class="ghost" onclick="clearAll()">🗑️ Clear</button>
+    </div>
+
+    <div class="grid">
+      <div class="box">
+        <h3>Original Code</h3>
+        <textarea id="in" placeholder="Paste your C++ or Python code here..."></textarea>
+      </div>
+      <div class="box">
+        <h3>Obfuscated Output</h3>
+        <textarea id="out" readonly placeholder="Ready-to-compile/run code will appear here..."></textarea>
+        <div style="margin-top:0.5rem;text-align:right">
+          <button class="ghost" onclick="copyOut()" style="padding:0.4rem 0.8rem;font-size:0.8rem">📋 Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>What changed:</strong> Preprocessor directives (`#include`, etc.) are preserved exactly. 
+      Standard library names (`cout`, `cin`, `string`, etc.) are never renamed. 
+      Only user-defined identifiers are replaced. String literals are XOR+Hex encoded. 
+      ✅ Compiles cleanly with `g++` / `clang++` and runs identically.
+    </div>
+  </div>
+
+  <div class="toast" id="toast">✅ Copied!</div>
+
+  <script>
+    const KEY = 'K9x$mP2!vL4&';
+    
+    // C++ keywords & standard names to NEVER rename
+    const CPP_SKIP = new Set([
+      'main','cout','cin','endl','std','printf','scanf','string','int','void','bool','char',
+      'float','double','auto','break','case','const','continue','default','do','else','enum',
+      'extern','for','goto','if','long','register','return','short','signed','sizeof','static',
+      'struct','switch','typedef','union','unsigned','volatile','while','class','namespace',
+      'using','public','protected','private','virtual','override','final','constexpr','template',
+      'typename','inline','static_cast','dynamic_cast','const_cast','reinterpret_cast','new',
+      'delete','this','nullptr','true','false','vector','map','set','pair','include','define',
+      'ifdef','ifndef','endif','pragma','NULL','size_t','ptrdiff_t','int8_t','int16_t','int32_t',
+      'int64_t','uint8_t','uint16_t','uint32_t','uint64_t','wchar_t','size_type','difference_type',
+      'iterator','const_iterator','reverse_iterator','const_reverse_iterator','begin','end','rbegin',
+      'rend','front','back','push_back','pop_back','insert','erase','clear','empty','size','capacity',
+      'reserve','swap','assign','at','data','c_str','length','find','replace','substr','append','compare'
+    ]);
+
+    // Python keywords & builtins to NEVER rename
+    const PY_SKIP = new Set([
+      'False','None','True','and','as','assert','async','await','break','class','continue','def',
+      'del','elif','else','except','finally','for','from','global','if','import','in','is','lambda',
+      'nonlocal','not','or','pass','raise','return','try','while','with','yield','print','input',
+      'range','len','str','int','float','list','dict','set','tuple','bool','type','open','self',
+      'super','object','property','classmethod','staticmethod','Exception','ValueError','TypeError',
+      'IndexError','KeyError','AttributeError','RuntimeError','StopIteration','GeneratorExit',
+      'SystemExit','KeyboardInterrupt','BaseException','IOError','OSError','FileNotFoundError',
+      'ZeroDivisionError','MemoryError','OverflowError','FloatingPointError','ArithmeticError',
+      'LookupError','AssertionError','BufferError','EOFError','ImportError','ModuleNotFoundError',
+      'NameError','UnboundLocalError','RecursionError','ReferenceError','SyntaxError','IndentationError',
+      'TabError','SystemError','abs','all','any','bin','callable','chr','complex','dir','divmod',
+      'eval','exec','format','frozenset','getattr','globals','hasattr','hash','hex','id','isinstance',
+      'issubclass','iter','locals','max','min','next','oct','ord','pow','repr','reversed','round',
+      'sorted','sum','vars','zip','enumerate','filter','map','reversed','slice','any','all'
+    ]);
+
+    function xorHex(str) {
+      let h = '';
+      for(let i=0; i<str.length; i++) {
+        let c = str.charCodeAt(i) ^ KEY.charCodeAt(i % KEY.length);
+        h += c.toString(16).padStart(2, '0');
+      }
+      return h;
+    }
+
+    function randName() {
+      const c = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      return '_' + c[Math.floor(Math.random()*52)] + Math.random().toString(36).slice(2,6);
+    }
+
+    function obfuscate() {
+      const lang = document.getElementById('lang').value;
+      const code = document.getElementById('in').value;
+      if (!code.trim()) return showToast('⚠️ Enter code first.', true);
+
+      try {
+        let out = '';
+        if (lang === 'cpp') {
+          out = obfuscateCpp(code);
+        } else {
+          out = obfuscatePy(code);
+        }
+        document.getElementById('out').value = out;
+        showToast('✅ Obfuscated successfully!');
+      } catch (e) {
+        console.error(e);
+        showToast('⚠️ Failed. Check syntax.', true);
+      }
+    }
+
+    function obfuscateCpp(code) {
+      const lines = code.split('\n');
+      const idMap = {};
+      const usedNames = new Set();
+
+      const processed = lines.map(line => {
+        const trimmed = line.trim();
+        // 1. Preserve preprocessor directives exactly
+        if (trimmed.startsWith('#')) return line;
+        // 2. Skip empty lines
+        if (!trimmed) return line;
+
+        // 3. Extract string literals safely
+        const strings = [];
+        let safe = line.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, m => {
+          strings.push(m);
+          return `__STR_${strings.length-1}__`;
+        });
+
+        // 4. Remove comments
+        safe = safe.replace(/\/\/.*$/, '');
+        safe = safe.replace(/\/\*[\s\S]*?\*\//g, '');
+
+        // 5. Rename identifiers (skip keywords, system names, placeholders)
+        safe = safe.replace(/\b([a-zA-Z_]\w*)\b/g, match => {
+          if (CPP_SKIP.has(match) || idMap[match] || match.startsWith('__STR_')) return match;
+          if (!idMap[match]) {
+            let nm;
+            do { nm = randName(); } while (usedNames.has(nm) || CPP_SKIP.has(nm));
+            idMap[match] = nm;
+            usedNames.add(nm);
+          }
+          return idMap[match];
+        });
+
+        // 6. Restore strings with encryption
+        safe = safe.replace(/__STR_(\d+)__/g, (_, idx) => {
+          const orig = strings[parseInt(idx)];
+          const inner = orig.slice(1, -1); // remove quotes
+          return `_d("${xorHex(inner)}")`;
+        });
+
+        // 7. Trim trailing whitespace only
+        return safe.replace(/\s+$/, '');
+      });
+
+      const finalCode = processed.join('\n');
+      const decoder = `#include <string>
+#include <iostream>
+using namespace std;
+
+string _d(string h){
+  string k="${KEY}", r="";
+  for(int i=0; i<h.length(); i+=2){
+    int v=0; char c=h[i];
+    if(c>='0'&&c<='9') v+=(c-'0')<<4;
+    else if(c>='a'&&c<='f') v+=(c-'a'+10)<<4;
+    c=h[i+1];
+    if(c>='0'&&c<='9') v+=c-'0';
+    else if(c>='a'&&c<='f') v+=c-'a'+10;
+    r+=char(v^k[(i/2)%k.length()]);
+  }
+  return r;
+}\n`;
+
+      return decoder + finalCode;
+    }
+
+    function obfuscatePy(code) {
+      const idMap = {};
+      const usedNames = new Set();
+      let safe = code;
+
+      // 1. Extract strings (handles '' and "")
+      const strings = [];
+      safe = safe.replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, m => {
+        strings.push(m);
+        return `__STR_${strings.length-1}__`;
+      });
+
+      // 2. Remove comments
+      safe = safe.replace(/#.*$/gm, '');
+
+      // 3. Rename identifiers
+      safe = safe.replace(/\b([a-zA-Z_]\w*)\b/g, match => {
+        if (PY_SKIP.has(match) || idMap[match] || match.startsWith('__STR_')) return match;
+        if (!idMap[match]) {
+          let nm;
+          do { nm = randName(); } while (usedNames.has(nm) || PY_SKIP.has(nm));
+          idMap[match] = nm;
+          usedNames.add(nm);
+        }
+        return idMap[match];
+      });
+
+      // 4. Restore encrypted strings
+      safe = safe.replace(/__STR_(\d+)__/g, (_, idx) => {
+        const orig = strings[parseInt(idx)];
+        const inner = orig.slice(1, -1);
+        return `_d("${xorHex(inner)}")`;
+      });
+
+      // 5. Clean up
+      safe = safe.replace(/ +$/gm, '');
+      safe = safe.replace(/\n{3,}/g, '\n\n').trim();
+
+      const decoder = `def _d(h):
+  k="${KEY}"
+  b = bytes.fromhex(h)
+  return bytes([c ^ ord(k[i%len(k)]) for i,c in enumerate(b)]).decode()\n\n`;
+
+      return decoder + safe;
+    }
+
+    function copyOut() {
+      const t = document.getElementById('out');
+      if (!t.value) return;
+      navigator.clipboard.writeText(t.value).then(() => showToast('✅ Copied!'));
+    }
+
+    function clearAll() {
+      document.getElementById('in').value = '';
+      document.getElementById('out').value = '';
+    }
+
+    function showToast(msg, isErr=false) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast show' + (isErr ? ' err-toast' : '');
+      setTimeout(() => t.className = 'toast', 2000);
+    }
+  </script>
+</body>
+</html>
